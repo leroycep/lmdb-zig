@@ -137,6 +137,7 @@ pub const Transaction = struct {
     txn: *MDB_txn,
 
     pub const Options = struct {
+        parent: ?*Transaction = null,
         readonly: bool = false,
     };
 
@@ -144,8 +145,10 @@ pub const Transaction = struct {
         var flags: u32 = 0;
         if (options.readonly) flags |= MDB_RDONLY;
 
+        const parent = if (options.parent) |parent| parent.txn else null;
+
         var txn_opt: ?*MDB_txn = null;
-        lmdbToZigErr(mdb_txn_begin(environment.env, null, flags, &txn_opt)) catch |err| switch (err) {
+        lmdbToZigErr(mdb_txn_begin(environment.env, parent, flags, &txn_opt)) catch |err| switch (err) {
             error.Panic,
             error.MapResized,
             error.ReadersFull,
