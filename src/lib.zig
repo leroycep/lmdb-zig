@@ -31,6 +31,19 @@ fn lmdbToZigErr(num: c_int) !void {
     }
 }
 
+fn span(mv: MDB_val) []u8 {
+    return @ptrCast([*]u8, mv.mv_data)[0..mv.mv_size];
+}
+
+fn spanMV(slice: []u8) MDB_val {
+    return MDB_val{ .mv_size = slice.len, .mv_data = slice.ptr };
+}
+
+fn spanMVConst(slice: []const u8) MDB_val {
+    const int_ptr = @ptrToInt(slice.ptr);
+    return MDB_val{ .mv_size = slice.len, .mv_data = @intToPtr([*]u8, int_ptr) };
+}
+
 pub const Environment = struct {
     env: *MDB_env,
 
@@ -180,17 +193,8 @@ pub const Transaction = struct {
         return Database.open(this, name, options);
     }
 
-    fn span(mv: MDB_val) []u8 {
-        return @ptrCast([*]u8, mv.mv_data)[0..mv.mv_size];
-    }
-
-    fn spanMV(slice: []u8) MDB_val {
-        return MDB_val{ .mv_size = slice.len, .mv_data = slice.ptr };
-    }
-
-    fn spanMVConst(slice: []const u8) MDB_val {
-        const int_ptr = @ptrToInt(slice.ptr);
-        return MDB_val{ .mv_size = slice.len, .mv_data = @intToPtr([*]u8, int_ptr) };
+    pub fn cursor(this: *@This(), db: Database) !Cursor {
+        return Cursor.open(this, db);
     }
 
     pub fn get(this: *@This(), db: Database, key: []const u8) !?[]const u8 {
@@ -272,6 +276,62 @@ pub const Database = struct {
 
         return @This(){
             .dbi = dbi,
+        };
+    }
+};
+
+pub const Cursor = struct {
+    cursor: *MDB_cursor,
+
+    pub fn open(transaction: *Transaction, database: Database) !@This() {
+        var cursor_opt: ?*MDB_cursor = null;
+        lmdbToZigErr(mdb_cursor_open(transaction.txn, database.dbi, &cursor_opt)) catch |err| switch (err) {
+            error.InvalidParameter => |e| return e,
+
+            else => unreachable,
+        };
+
+        return @This(){
+            .cursor = cursor_opt.?,
+        };
+    }
+
+    pub fn close(this: *@This()) void {
+        mdb_cursor_close(this.cursor);
+    }
+
+    pub const Op = enum {
+        First,
+        Next,
+        Last,
+        Prev,
+    };
+
+    pub const Entry = struct {
+        key: []const u8,
+        value: []const u8,
+    };
+
+    pub fn get(this: *@This(), key_opt: ?[]const u8, op: Op) !?Entry {
+        var key_mv: MDB_val = if (key_opt) |key| spanMVConst(key) else .{ .mv_data = null, .mv_size = 0 };
+        var val_mv: MDB_val = .{ .mv_data = null, .mv_size = 0 };
+
+        const mdb_op: MDB_cursor_op = switch (op) {
+            .First => .MDB_FIRST,
+            .Next => .MDB_NEXT,
+            .Last => .MDB_LAST,
+            .Prev => .MDB_PREV,
+        };
+
+        lmdbToZigErr(mdb_cursor_get(this.cursor, &key_mv, &val_mv, mdb_op)) catch |err| switch (err) {
+            error.NotFound => return null,
+            error.InvalidParameter => |e| return e,
+            else => unreachable,
+        };
+
+        return Entry{
+            .key = span(key_mv),
+            .value = span(val_mv),
         };
     }
 };
