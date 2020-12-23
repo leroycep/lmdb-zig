@@ -81,3 +81,8 @@ If you want to go further than this, please check out the official [LMDB Getting
 Started][lmdb-getting-started] documentation.
 
 [lmdb-getting-started]: http://www.lmdb.tech/doc/starting.html
+
+## Raw Bindings
+
+Because `lmdb-zig` is new, not all the LMDB API is covered. If you want to
+access the raw bindings, use `lmdb.sys` or `@cInclude("lmdb.h")`.
